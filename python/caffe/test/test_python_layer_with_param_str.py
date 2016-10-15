@@ -11,7 +11,7 @@ class SimpleParamLayer(caffe.Layer):
 
     def setup(self, bottom, top):
         try:
-            self.value = float(self.param_str)
+            self.value = float(self.param_str_)
         except ValueError:
             raise ValueError("Parameter string must be a legible float")
 
