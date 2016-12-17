@@ -22,6 +22,7 @@ def parse_log(path_to_log):
     rows
     """
 
+    regex_phase = re.compile('\+ ./tools/(\S+)')
     regex_iteration = re.compile('Iteration (\d+)')
     regex_train_output = re.compile('Train net output #(\d+): (\S+) = ([\.\deE+-]+)')
     regex_test_output = re.compile('Test net output #(\d+): (\S+) = ([\.\deE+-]+)')
@@ -38,41 +39,55 @@ def parse_log(path_to_log):
     logfile_year = extract_seconds.get_log_created_year(path_to_log)
     with open(path_to_log) as f:
         start_time = extract_seconds.get_start_time(f, logfile_year)
-
+        time = 0.
+        seconds = 0.
+        phase=0
         for line in f:
-            iteration_match = regex_iteration.search(line)
-            if iteration_match:
-                iteration = float(iteration_match.group(1))
-            if iteration == -1:
-                # Only start parsing for other stuff if we've found the first
-                # iteration
+            try:
+                phase_match = regex_phase.search(line)
+                if phase_match:
+                    phase = phase+1
+                    start_time = time
+                    continue
+                iteration_match = regex_iteration.search(line)
+                if iteration_match:
+                        iteration = float(iteration_match.group(1))
+                        time = extract_seconds.extract_datetime_from_line(line,logfile_year)
+                        seconds = (time - start_time).total_seconds()
+                        continue
+
+
+
+                lr_match = regex_learning_rate.search(line)
+                if lr_match:
+                    learning_rate = float(learning_rate_match.group(1))
+
+                train_match = regex_train_output.search(line)
+                if train_match:
+                    train_dict_list, train_row = parse_line_for_net_output(
+                        regex_train_output, train_row, train_dict_list,
+                        line, iteration, seconds, learning_rate, phase
+                    )
+
+                test_match = regex_test_output.search(line)
+                if test_match:
+                    test_dict_list, test_row = parse_line_for_net_output(
+                        regex_test_output, test_row, test_dict_list,
+                        line, iteration, seconds, learning_rate, phase
+                    )
+            except ValueError:
+                print("Oops!")
+                print line
                 continue
-
-            time = extract_seconds.extract_datetime_from_line(line,
-                                                              logfile_year)
-            seconds = (time - start_time).total_seconds()
-
-            learning_rate_match = regex_learning_rate.search(line)
-            if learning_rate_match:
-                learning_rate = float(learning_rate_match.group(1))
-
-            train_dict_list, train_row = parse_line_for_net_output(
-                regex_train_output, train_row, train_dict_list,
-                line, iteration, seconds, learning_rate
-            )
-            test_dict_list, test_row = parse_line_for_net_output(
-                regex_test_output, test_row, test_dict_list,
-                line, iteration, seconds, learning_rate
-            )
-
     fix_initial_nan_learning_rate(train_dict_list)
     fix_initial_nan_learning_rate(test_dict_list)
 
+    #print train_dict_list
     return train_dict_list, test_dict_list
 
 
 def parse_line_for_net_output(regex_obj, row, row_dict_list,
-                              line, iteration, seconds, learning_rate):
+                              line, iteration, seconds, learning_rate, phase):
     """Parse a single line for training or test output
 
     Returns a a tuple with (row_dict_list, row)
@@ -93,9 +108,14 @@ def parse_line_for_net_output(regex_obj, row, row_dict_list,
                 row_dict_list.append(row)
 
             row = OrderedDict([
+                ('Phase', phase),
                 ('NumIters', iteration),
                 ('Seconds', seconds),
-                ('LearningRate', learning_rate)
+                ('LearningRate', learning_rate),
+                ('rpn_cls_loss', float('NaN')),
+                ('rpn_loss_bbox', float('NaN')),
+                ('loss_cls', float('NaN')),
+                ('loss_bbox', float('NaN'))
             ])
 
         # output_num is not used; may be used in the future
@@ -155,6 +175,7 @@ def write_csv(output_filename, dict_list, delimiter, verbose=False):
     dialect.delimiter = delimiter
 
     with open(output_filename, 'w') as f:
+        keys = ['NumIters','LearningRate']
         dict_writer = csv.DictWriter(f, fieldnames=dict_list[0].keys(),
                                      dialect=dialect)
         dict_writer.writeheader()
